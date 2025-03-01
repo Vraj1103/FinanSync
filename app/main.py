@@ -276,9 +276,11 @@ async def refresh_access_token(token_request: TokenRefreshRequest):
 
 @app.get("/users/{user_id}")
 async def get_user(user_id: str, current_user: dict = Depends(get_current_user)):
-    user = users_collection.find_one({"_id": ObjectId(user_id)})
+    user_id = current_user["_id"]
+    user = users_collection.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    user["_id"] = str(user["_id"])
     return user
 
 @app.put("/users/{user_id}")
