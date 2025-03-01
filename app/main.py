@@ -11,10 +11,19 @@ import jwt
 from openai import OpenAI
 import fitz
 from fastapi import File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from .db import users_collection, financial_data_collection
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # Initialize OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -225,41 +234,6 @@ async def update_user(user_id: str, user_update: UserUpdate, current_user: dict 
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User updated successfully"}
 
-# @app.put("/user/profile")
-# async def update_profile(profile_update: ProfileUpdate, current_user: dict = Depends(get_current_user)):
-#     """
-#     Update the authenticated user's profile information.
-#     Uses the token to identify the user, no need to specify user_id in the URL.
-#     """
-#     user_id = current_user["_id"]
-
-#     if not user_id:
-#         raise HTTPException(status_code=401, detail="User ID not found in token")
-
-#     # find user based on user_id from user collection
-#     user = users_collection.find_one({"_id": ObjectId(user_id)})
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     # Filter only non-None fields
-#     update_data = {k: v for k, v in profile_update.dict().items() if v is not None}
-    
-#     if not update_data:
-#         raise HTTPException(status_code=400, detail="No data provided for update")
-    
-#     # Update the user profile
-#     result = users_collection.update_one(
-#         {"_id": ObjectId(user_id)}, 
-#         {"$set": update_data}
-#     )
-    
-#     if result.matched_count == 0:
-#         raise HTTPException(status_code=404, detail="User not found")
-    
-#     # Return the updated user profile
-#     updated_user = users_collection.find_one({"_id": ObjectId(user_id)})
-#     return convert_object_id(updated_user)
-
 from fastapi import Form
 
 @app.put("/user/profile", response_model=ProfileResponse)
@@ -465,30 +439,3 @@ async def generate_quiz(
         raise HTTPException(status_code=500, detail="GPT-4 returned invalid JSON.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/upload-itr", response_model=ITRResponse)
-async def upload_itr(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    """
-    Upload and process an ITR (Income Tax Return) PDF file.
-    Extracts key-value details and stores them in the user's profile.
-    """
-    try:
-        # Read and extract text from PDF
-        pdf_bytes = await file.read()
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        extracted_text = "\n".join([page.get_text("text") for page in doc])
-
-        # Parse structured key-value data
-        parsed_data = parse_itr(extracted_text)
-
-        # Store structured data in the user's collection
-        users_collection.update_one({"_id": ObjectId(current_user["_id"])}, {"$set": parsed_data})
-
-        return ITRResponse(
-            message="ITR uploaded and processed successfully.",
-            income_mode=parsed_data["income_mode"],
-            extracted_data=parsed_data
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing ITR: {str(e)}")
