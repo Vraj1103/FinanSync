@@ -61,54 +61,78 @@ uvicorn main:app --reload
 
 ### **Authentication**
 
-# Register a new user
+#### Register a new user
 
+```sh
 POST /users/register
+```
 
-# Login and get access token
+#### Login and get access token
 
+```sh
 POST /users/login
+```
 
-# Refresh access token
+#### Refresh access token
 
+```sh
 POST /token/refresh
+```
 
 ### **User Management**
 
-# List all users (admin only)
+#### List all users (admin only)
 
+```sh
 GET /users
+```
 
-# Get user details
+####Get user details
 
+```sh
 GET /users/{user_id}
+```
 
-# Update user information
+####Update user information
 
+```sh
 PUT /users/{user_id}
+```
 
-# Update user profile with optional ITR file upload
+####Update user profile with optional ITR file upload
 
+```sh
 PUT /user/profile
+```
 
 ### **Financial Services**
 
-# Chat with AI financial assistant
+####Chat with AI financial assistant
 
+```sh
 POST /chat
+```
 
-# Add financial data (income/expenses)
+####Add financial data (income/expenses)
 
+```sh
 POST /financial-data
+```
 
-# Get personalized financial recommendations
+####Get personalized financial recommendations
 
+```sh
 GET /financial-recommendations/{user_id}
+```
 
-# View financial dashboard
+####View financial dashboard
 
+```sh
 GET /dashboard/{user_id}
+```
 
-# Generate personalized financial literacy quiz
+####Generate personalized financial literacy quiz
 
+```sh
 POST /generate-quiz
+```
