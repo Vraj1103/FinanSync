@@ -13,7 +13,7 @@ import fitz
 from fastapi import File, UploadFile,Form
 from fastapi.middleware.cors import CORSMiddleware
 
-from .db import users_collection, financial_data_collection
+from .db import users_collection, financial_data_collection, chat_collection
 
 app = FastAPI()
 
@@ -64,7 +64,7 @@ class UserUpdate(BaseModel):
 class ChatMessage(BaseModel):
     user_id: str
     message: str
-
+    thread_id: Optional[str] = None
 class FinancialData(BaseModel):
     user_id: str
     income: float
@@ -244,7 +244,7 @@ async def register_user(
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
-            "token_type": "bearer"
+            "user_id": user_id
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error registering user: {str(e)}")
@@ -258,7 +258,7 @@ async def login_user(user: UserLogin):
         user_data = {"user_id": str(db_user["_id"]), "email": db_user["email"]}
         access_token = create_access_token(user_data)
         refresh_token = create_refresh_token(user_data)
-        return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+        return {"access_token": access_token, "refresh_token": refresh_token,"user_id":str(db_user["_id"])}
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
@@ -350,9 +350,7 @@ async def update_profile(
     )
 
 @app.post("/chat")
-async def chat(chat_msg: ChatMessage
-               , current_user: dict = Depends(get_current_user)
-               ):
+async def chat(chat_msg: ChatMessage, current_user: dict = Depends(get_current_user)):
     try:
         # Call the ChatGPT API using OpenAI's ChatCompletion endpoint
         user_id = current_user["_id"]
@@ -439,7 +437,55 @@ async def chat(chat_msg: ChatMessage
         )
         answer = response.choices[0].message.content
         answer_json = json.loads(answer)
-        return {"response": answer_json}
+        timestamp = datetime.utcnow()
+        thread_id = None
+        if chat_msg.thread_id:
+            chat_thread = chat_collection.find_one({"_id": ObjectId(chat_msg.thread_id)})
+            if chat_thread:
+                # Update existing thread
+                thread_id = chat_msg.thread_id
+                chat_collection.update_one(
+                    {"_id": ObjectId(thread_id)},
+                    {"$push": {"messages": {
+                        "role": "user",
+                        "content": chat_msg.message,
+                        "timestamp": timestamp
+                    }}}
+                )
+                chat_collection.update_one(
+                    {"_id": ObjectId(thread_id)},
+                    {"$push": {"messages": {
+                        "role": "assistant",
+                        "content": answer_json,
+                        "timestamp": timestamp
+                    }}}
+                )
+        
+        # If thread_id wasn't provided or wasn't found, create a new thread
+        if not thread_id:
+            result = chat_collection.insert_one({
+                "user_id": str(user_id),
+                "created_at": timestamp,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": chat_msg.message,
+                        "timestamp": timestamp
+                    },
+                    {
+                        "role": "assistant",
+                        "content": answer_json,
+                        "timestamp": timestamp
+                    }
+                ]
+            })
+            thread_id = str(result.inserted_id)
+        
+        # Return the answer and thread_id
+        return {
+            "response": answer_json,
+            "thread_id": thread_id
+        }
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="Error parsing response from OpenAI")
     except Exception as e:

@@ -15,6 +15,7 @@ try:
     # Collections
     users_collection = db["users"]
     financial_data_collection = db["financial_data"]
+    chat_collection = db["chat"]
 except Exception as e:
     print(f"Error connecting to MongoDB: {e}")
     exit(1)
