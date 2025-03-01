@@ -279,7 +279,7 @@ async def get_user(user_id: str, current_user: dict = Depends(get_current_user))
     user = users_collection.find_one({"_id": ObjectId(user_id)})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return convert_object_id(user)
+    return user
 
 @app.put("/users/{user_id}")
 async def update_user(user_id: str, user_update: UserUpdate, current_user: dict = Depends(get_current_user)):
@@ -498,11 +498,103 @@ async def add_financial_data(data: FinancialData, current_user: dict = Depends(g
 
 @app.get("/financial-recommendations/{user_id}")
 async def get_financial_recommendations(user_id: str, current_user: dict = Depends(get_current_user)):
-    data = financial_data_collection.find_one({"user_id": user_id})
+    user_id = current_user["_id"]
+    data = users_collection.find_one({"_id": user_id})
     if not data:
         raise HTTPException(status_code=404, detail="Financial data not found for user")
-    recommendation = "Save more" if data["income"] > data["expenses"] else "Cut down expenses"
-    return {"recommendation": recommendation}
+
+    # Extract required financial details
+    salary_income = float(data.get("salary_income", 0))
+    deduction_80C = float(data.get("deduction_80C", 0))
+    deduction_80D = float(data.get("deduction_80D", 0))
+    taxable_income = float(data.get("taxable_income", 0))
+    total_tax_payable = float(data.get("total_tax_payable", 0))
+    tds_deducted = float(data.get("tds_deducted", 0))
+    refund_due = float(data.get("refund_due", 0))
+
+    # Monthly breakdown calculations
+    monthly_income = round(salary_income / 12, 1)
+    tax_deduction_monthly = round(total_tax_payable / 12, 1)
+    monthly_deductions = round((deduction_80C + deduction_80D) / 12, 1)
+    post_tax_income = round(monthly_income - tax_deduction_monthly - monthly_deductions, 1)
+
+    # Budget Allocation (Dynamic)
+    budget_allocation = {
+        "Essentials (Rent, Bills, Groceries, Transport)": round(post_tax_income * 0.5, 1),
+        "Investments (SIP, Stocks, Mutual Funds)": round(post_tax_income * 0.2, 1),
+        "Savings (Emergency Fund, FD, PPF)": round(post_tax_income * 0.15, 1),
+        "Leisure (Dining, Shopping, Travel)": round(post_tax_income * 0.1, 1),
+        "Miscellaneous (Unexpected expenses, Charity)": round(post_tax_income * 0.05, 1)
+    }
+
+    # Recommended Investment Portfolio (Dynamic)
+    investment_portfolio = {
+        "Mutual Funds (SIP)": post_tax_income * 0.08,
+        "Stocks": post_tax_income * 0.06,
+        "Fixed Deposits (FDs)": post_tax_income * 0.03,
+        "Gold/Real Estate": post_tax_income * 0.02,
+        "Crypto/Alternative Investments": post_tax_income * 0.01
+    }
+
+    # Emergency Fund Growth (assuming user saves 15% of monthly post-tax income)
+    emergency_fund_growth = [
+        {"name": f"Month {i+1}", "value": round((post_tax_income * 0.15),1) * (i+1)} for i in range(12)
+    ]
+
+    # Discretionary vs Non-Discretionary Expenses (Dynamic)
+    discretionary_vs_fixed_expenses = {
+        "Fixed Expenses (Rent, EMI, Bills, Food, Transport)": round(post_tax_income * 0.6, 1),
+        "Discretionary Expenses (Shopping, Dining, Travel)": round(post_tax_income * 0.2, 1),
+        "Savings & Investments": round(post_tax_income * 0.2, 1)
+    }
+
+    # Highcharts JSON Response
+    return {
+        "text": "Based on your financial data, here are key insights into your monthly spending, savings, and investment potential.",
+        "chart_names": [
+            {
+                "type": "pie",
+                "data": [{"name": k, "value": v} for k, v in budget_allocation.items()],
+                "options": {
+                    "xKey": "name",
+                    "yKey": "value",
+                    "title": "Monthly Budget Allocation"
+                }
+            },
+            {
+                "type": "bar",
+                "data": [
+                    {"name": "Gross Monthly Salary", "value": monthly_income},
+                    {"name": "Tax Deducted", "value": tax_deduction_monthly},
+                    {"name": "Deductions (80C + 80D)", "value": monthly_deductions},
+                    {"name": "Taxable Income After Deductions", "value": post_tax_income}
+                ],
+                "options": {
+                    "xKey": "name",
+                    "yKey": "value",
+                    "title": "Monthly Tax & Savings Breakdown"
+                }
+            },
+            {
+                "type": "line",
+                "data": emergency_fund_growth,
+                "options": {
+                    "xKey": "name",
+                    "yKey": "value",
+                    "title": "Emergency Fund Growth Over Time"
+                }
+            },
+            {
+                "type": "stackedBar",
+                "data": [{"name": k, "value": v} for k, v in discretionary_vs_fixed_expenses.items()],
+                "options": {
+                    "xKey": "name",
+                    "yKey": "value",
+                    "title": "Discretionary vs Non-Discretionary Expenses"
+                }
+            }
+        ]
+    }
 
 @app.get("/dashboard/{user_id}")
 async def get_dashboard(user_id: str, current_user: dict = Depends(get_current_user)):
