@@ -10,7 +10,7 @@ from bson import ObjectId
 import jwt
 from openai import OpenAI
 import fitz
-from fastapi import File, UploadFile
+from fastapi import File, UploadFile,Form
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import users_collection, financial_data_collection
@@ -36,7 +36,10 @@ class UserRegister(BaseModel):
     username: str
     email: EmailStr
     password: str
-
+    age: Optional[str] = None
+    goal: Optional[str] = None
+    risk_tolerance: Optional[str] = None
+    work_type : Optional[str] = None
 class ProfileUpdateRequest(BaseModel):
     age: Optional[str] = None
     goal: Optional[str] = None
@@ -110,7 +113,8 @@ def parse_itr(text: str) -> Dict[str, Any]:
     parsed_data = {}
 
     # Extract personal details
-    parsed_data["name"] = re.search(r"Name:\s*([\w\s]+)", text).group(1) if re.search(r"Name:\s*([\w\s]+)", text) else None
+    name_match = re.search(r"Name:\s*([\w ]+)", text)
+    parsed_data["name"] = name_match.group(1).strip() if name_match else None
     parsed_data["pan"] = re.search(r"PAN:\s*([\w\d]+)", text).group(1) if re.search(r"PAN:\s*([\w\d]+)", text) else None
     parsed_data["address"] = re.search(r"Address:\s*(.+)", text).group(1) if re.search(r"Address:\s*(.+)", text) else None
     parsed_data["contact"] = re.search(r"Contact:\s*([\d]+)", text).group(1) if re.search(r"Contact:\s*([\d]+)", text) else None
@@ -172,7 +176,7 @@ def convert_object_id(document: dict) -> dict:
     return document
 
 # ------------------------
-# Root Endpoint
+# Root Eparsed_data["name"] = re.search(r"Name:\s*([\w\s]+)", text).group(1) if re.search(r"Name:\s*([\w\s]+)", text) else Nonendpoint
 # ------------------------
 @app.get("/")
 async def root():
@@ -187,24 +191,77 @@ async def get_users(current_user: dict = Depends(get_current_user)):
     return users
 
 @app.post("/users/register")
-async def register_user(user: UserRegister):
-    if users_collection.find_one({"email": user.email}):
-        raise HTTPException(status_code=400, detail="Email already registered")
-    new_user = user.dict()
-    result = users_collection.insert_one(new_user)
-    new_user["_id"] = str(result.inserted_id)
-    return new_user
+async def register_user(
+    username: str = Form(...),
+    email: EmailStr = Form(...),
+    password: str = Form(...),
+    age: Optional[str] = Form(None),
+    goal: Optional[str] = Form(None),
+    risk_tolerance: Optional[str] = Form(None),
+    work_type: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None)
+):
+    try:
+        if users_collection.find_one({"email": email}):
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Create user data dictionary
+        new_user = {
+            "username": username,
+            "email": email,
+            "password": password,
+            "age": age,
+            "goal": goal,
+            "risk_tolerance": risk_tolerance,
+            "work_type": work_type
+        }
+        
+        # Process ITR file if uploaded
+        if file:
+            try:
+                pdf_bytes = await file.read()
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                extracted_text = "\n".join([page.get_text("text") for page in doc])
 
+                extracted_data = parse_itr(extracted_text)
+                income_mode = extracted_data.get("income_mode", "unknown")
+
+                # Add extracted ITR data to user data
+                new_user.update(extracted_data)
+                new_user["income_mode"] = income_mode
+
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error processing ITR: {str(e)}")
+        
+        # Insert user into database
+        result = users_collection.insert_one(new_user)
+        new_user["_id"] = str(result.inserted_id)
+        user_id = new_user["_id"]
+        user_data = {"user_id": user_id, "email": new_user["email"]}
+        access_token = create_access_token(user_data)
+        refresh_token = create_refresh_token(user_data)
+
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error registering user: {str(e)}")
+    
 @app.post("/users/login")
 async def login_user(user: UserLogin):
-    db_user = users_collection.find_one({"email": user.email, "password": user.password})
-    if not db_user:
+    try:
+        db_user = users_collection.find_one({"email": user.email, "password": user.password})
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        user_data = {"user_id": str(db_user["_id"]), "email": db_user["email"]}
+        access_token = create_access_token(user_data)
+        refresh_token = create_refresh_token(user_data)
+        return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+    except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    user_data = {"user_id": str(db_user["_id"]), "email": db_user["email"]}
-    access_token = create_access_token(user_data)
-    refresh_token = create_refresh_token(user_data)
-    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
-
+    
 @app.post("/token/refresh")
 async def refresh_access_token(token_request: TokenRefreshRequest):
     try:
@@ -234,7 +291,6 @@ async def update_user(user_id: str, user_update: UserUpdate, current_user: dict 
         raise HTTPException(status_code=404, detail="User not found")
     return {"message": "User updated successfully"}
 
-from fastapi import Form
 
 @app.put("/user/profile", response_model=ProfileResponse)
 async def update_profile(
@@ -311,12 +367,81 @@ async def chat(chat_msg: ChatMessage
                 """
                 You are a virtual financial assistant. Provide general or data-driven advice on budgeting, investing, and debt management. You are not a certified professional—always include disclaimers and advise consultation with experts. If user data is provided, customize responses; otherwise, offer general guidance. Maintain a professional, concise, and approachable tone. Respect privacy. When unsure, clarify assumptions. Clearly distinguish fact from opinion, disclaim liability, and encourage users to verify information.
 
+                ### **Response Format**
+                Your response must always be in the following JSON format:
+                {
+                "text": "res",
+                "chart_names": "highcharts obj"
+                }
+
+                - `"text"` must contain a **single plain-text paragraph without any formatting** (no bullet points, line breaks, bold text, or special characters).
+                - `"text"` must be **concise and to the point**.
+                - `"chart_names"` contains a Highcharts-compatible object **only when the response includes numerical data**.
+                - If no chart is needed, set `"chart_names": null`.
+
+                ### **Example of a Chart-Compatible Object**
+                {
+                "chart_names": {
+                    "type": "bar",
+                    "data": [
+                    { "name": "Stocks", "value": 15 },
+                    { "name": "Bonds", "value": 5 },
+                    { "name": "Real Estate", "value": 10 },
+                    { "name": "Commodities", "value": 8 },
+                    { "name": "Cash", "value": 1 }
+                    ],
+                    "options": {
+                    "xKey": "name",
+                    "yKey": "value",
+                    "title": "Asset Class Performance (% Return)"
+                    }
+                }
+                }
+
+                ### **Chart Type Explanation**
+                - `"type"` defines the appropriate chart format:
+                - `"bar"` → for comparisons (e.g., asset allocation, spending categories)
+                - `"line"` → for trends (e.g., stock performance, savings growth)
+                - `"pie"` → for proportion-based data (e.g., portfolio distribution)
+                - `"scatter"` → for correlation analysis (e.g., risk vs. return)
+
+                - `"data"` includes key-value pairs representing the dataset.
+                - `"options"` specifies Highcharts-compatible keys like `"xKey"`, `"yKey"`, and `"title"`.
+
+                ### **Key Constraints**
+                - **No bullet points, line breaks, bold text, or special characters in `"text"`**. The response must be a **single, unformatted plain-text paragraph**.
+                - **If the response contains numerical data, include a `"chart_names"` object** with an appropriate `"type"`.
+                - **If no numerical data is present, set `"chart_names": null"`.
+
+                ### **Correct Example of `text`**
+                {
+                "text": "Based on your income of 32,000 INR per month, you can allocate 20% (6,400 INR) for an emergency fund, 30% (9,600 INR) for SIP investments, 10% (3,200 INR) for retirement savings, 10% (3,200 INR) for medium-term goals, and 30% (9,600 INR) for living expenses and discretionary spending. Regularly review your strategy and consult a financial advisor to ensure alignment with your goals.",
+                "chart_names": {
+                    "type": "pie",
+                    "data": [
+                    { "name": "Emergency Fund", "value": 20 },
+                    { "name": "SIP Investment", "value": 30 },
+                    { "name": "Retirement Savings", "value": 10 },
+                    { "name": "Short to Medium-Term Goals", "value": 10 },
+                    { "name": "Living Expenses and Discretionary Spending", "value": 30 }
+                    ],
+                    "options": {
+                    "xKey": "name",
+                    "yKey": "value",
+                    "title": "Income Allocation Strategy"
+                    }
+                }
+                }
+
                 """},
                 {"role": "user", "content": chat_msg.message}
             ]
         )
         answer = response.choices[0].message.content
-        return {"response": answer}
+        answer_json = json.loads(answer)
+        return {"response": answer_json}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Error parsing response from OpenAI")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating response: {str(e)}")
 
