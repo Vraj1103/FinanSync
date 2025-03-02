@@ -89,19 +89,19 @@ POST /token/refresh
 GET /users
 ```
 
-####Get user details
+#### Get user details
 
 ```sh
 GET /users/{user_id}
 ```
 
-####Update user information
+#### Update user information
 
 ```sh
 PUT /users/{user_id}
 ```
 
-####Update user profile with optional ITR file upload
+#### Update user profile with optional ITR file upload
 
 ```sh
 PUT /user/profile
@@ -109,31 +109,31 @@ PUT /user/profile
 
 ### **Financial Services**
 
-####Chat with AI financial assistant
+#### Chat with AI financial assistant
 
 ```sh
 POST /chat
 ```
 
-####Add financial data (income/expenses)
+#### Add financial data (income/expenses)
 
 ```sh
 POST /financial-data
 ```
 
-####Get personalized financial recommendations
+#### Get personalized financial recommendations
 
 ```sh
 GET /financial-recommendations/{user_id}
 ```
 
-####View financial dashboard
+#### View financial dashboard
 
 ```sh
 GET /dashboard/{user_id}
 ```
 
-####Generate personalized financial literacy quiz
+#### Generate personalized financial literacy quiz
 
 ```sh
 POST /generate-quiz
